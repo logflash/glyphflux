@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/glyphflux-logo.svg" width="72" height="72" alt="Glyphflux" />
+</p>
+
 # Glyphflux
 
 Glyphflux morphs between *allographs* (i.e., the same text across different fonts), without the folding and twisting of characters produced by naive SVG point matching.

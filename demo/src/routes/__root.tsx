@@ -2,6 +2,7 @@ import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-r
 import type { ReactNode } from 'react'
 import { fontFaceCss } from '../catalog'
 import { refreshFrameBootstrap } from '../refreshFrame'
+import glyphfluxLogoUrl from '../../../assets/glyphflux-logo.svg?url'
 import '../../../styles.css'
 import '../styles.css'
 
@@ -15,7 +16,7 @@ export const Route = createRootRoute({
         content: 'Glyphflux morphs the same text smoothly between different fonts.',
       },
     ],
-    links: [{ rel: 'icon', href: 'data:,' }],
+    links: [{ rel: 'icon', href: glyphfluxLogoUrl, type: 'image/svg+xml', sizes: 'any' }],
   }),
   shellComponent: RootDocument,
   component: Outlet,

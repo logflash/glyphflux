@@ -1,4 +1,5 @@
 import { languages } from './catalog'
+import glyphfluxLogoUrl from '../../assets/glyphflux-logo.svg?url'
 
 interface DemoHeaderProps {
   locale: string
@@ -12,6 +13,7 @@ export function DemoHeader({ locale, title, selectId, onLocaleChange }: DemoHead
     <header className="demo-header">
       <div>
         <div className="eyebrow-row">
+          <img className="glyphflux-logo" src={glyphfluxLogoUrl} alt="" width="20" height="20" />
           <p className="eyebrow">Glyphflux</p>
           <a
             className="github-link"
