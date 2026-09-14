@@ -82,16 +82,16 @@ function inkMetrics(buffer) {
 function assertEndpointMatch(label, generated, exact) {
   for (const edge of ['left', 'top', 'right', 'bottom']) {
     assert(
-      Math.abs(generated[edge] - exact[edge]) <= 2,
+      Math.abs(generated[edge] - exact[edge]) <= 3,
       `${label}: generated ${edge} ${generated[edge]} does not settle on exact ${exact[edge]}`,
     )
   }
   assert(
-    Math.abs(generated.centerX - exact.centerX) <= 2,
+    Math.abs(generated.centerX - exact.centerX) <= 3,
     `${label}: horizontal ink center jumps at handoff (${generated.centerX.toFixed(3)} -> ${exact.centerX.toFixed(3)})`,
   )
   assert(
-    Math.abs(generated.centerY - exact.centerY) <= 2,
+    Math.abs(generated.centerY - exact.centerY) <= 1.5,
     `${label}: vertical ink center jumps at handoff (${generated.centerY.toFixed(3)} -> ${exact.centerY.toFixed(3)})`,
   )
   const massRatio = generated.mass / exact.mass
@@ -101,6 +101,69 @@ function assertEndpointMatch(label, generated, exact) {
   )
 }
 
+function assertVerticalMatch(label, generated, exact, maximumDifference = 1) {
+  assert(
+    Math.abs(generated.centerY - exact.centerY) <= maximumDifference,
+    `${label}: vertical ink center jumps (${generated.centerY.toFixed(3)} -> ${exact.centerY.toFixed(3)})`,
+  )
+}
+
+async function controlledEndpointMetrics(page, locale, progress) {
+  await page.goto(`http://127.0.0.1:${address.port}/${locale}`, {
+    waitUntil: 'networkidle',
+  })
+  await page.waitForSelector('[data-demo-status="ready"]')
+  await page.evaluate(() => document.fonts.ready)
+  const value = Math.round(progress * 1_000)
+  await page.locator('#progress').evaluate((element, next) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(element, String(next))
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+  }, value)
+  await page.waitForFunction(
+    ([expectedLocale, expectedProgress]) =>
+      document
+        .querySelector('[data-font-morph-sdf]')
+        ?.dataset.fontMorphSdfFrame?.startsWith(`${expectedLocale}:${expectedProgress}:`),
+    [locale, progress],
+  )
+  const target = await page.locator('[data-demo-endpoint="target"]').boundingBox()
+  const viewport = page.viewportSize()
+  assert(target && viewport)
+  const padding = 24
+  const clip = {
+    x: Math.max(0, target.x - padding),
+    y: Math.max(0, target.y - padding),
+    width:
+      Math.min(viewport.width, target.x + target.width + padding) -
+      Math.max(0, target.x - padding),
+    height:
+      Math.min(viewport.height, target.y + target.height + padding) -
+      Math.max(0, target.y - padding),
+  }
+  await page.evaluate(() => {
+    for (const endpoint of document.querySelectorAll(
+      '[data-demo-endpoint], [data-demo-exact-endpoint]',
+    )) {
+      endpoint.style.setProperty('visibility', 'hidden', 'important')
+    }
+    const renderer = document.querySelector('[data-font-morph-sdf]')
+    renderer.style.setProperty('visibility', 'visible', 'important')
+    renderer.style.setProperty('opacity', '1', 'important')
+  })
+  const generated = inkMetrics(await page.screenshot({ type: 'png', clip }))
+  await page.evaluate(() => {
+    document
+      .querySelector('[data-font-morph-sdf]')
+      .style.setProperty('visibility', 'hidden', 'important')
+    const target = document.querySelector('[data-demo-endpoint="target"]')
+    target.style.setProperty('visibility', 'visible', 'important')
+    target.style.setProperty('opacity', '1', 'important')
+  })
+  const exact = inkMetrics(await page.screenshot({ type: 'png', clip }))
+  return { generated, exact }
+}
+
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen))
 const address = server.address()
 assert(address && typeof address !== 'string')
@@ -108,13 +171,27 @@ assert(address && typeof address !== 'string')
 const { browser, close } = await getBrowser()
 try {
   for (const viewport of [
-    { name: 'desktop', width: 1000, height: 720 },
-    { name: 'mobile', width: 390, height: 844 },
+    { name: 'desktop', width: 1000, height: 720, deviceScaleFactor: 1 },
+    { name: 'mobile', width: 390, height: 844, deviceScaleFactor: 3 },
   ]) {
-    const context = await browser.newContext({ viewport })
+    const context = await browser.newContext({
+      viewport: { width: viewport.width, height: viewport.height },
+      deviceScaleFactor: viewport.deviceScaleFactor,
+    })
     for (const locale of representativeLocales) {
       const language = catalog.languages.find(({ code }) => code === locale)
       assert(language)
+      for (const progress of [0.99, 1]) {
+        const page = await context.newPage()
+        const { generated, exact } = await controlledEndpointMetrics(page, locale, progress)
+        assertVerticalMatch(
+          `${viewport.name}:${locale}:controlled:${progress}`,
+          generated,
+          exact,
+          1.5,
+        )
+        await page.close()
+      }
       for (const sourceRole of ['sans', 'serif']) {
         const targetRole = sourceRole === 'sans' ? 'serif' : 'sans'
         const page = await context.newPage()

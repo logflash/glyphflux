@@ -153,10 +153,14 @@ interface GlyphStyle {
   fontFamily: string
   fontStyle: string
   fontWeight: string
+  fontStretch?: string
+  fontKerning?: string
+  fontVariantCaps?: string
   fontSizeToHeight: number
   /** Browser alphabetic baseline as a fraction of the endpoint line box. */
   baselineToHeight?: number
   letterSpacingEm: number
+  wordSpacingEm?: number
   direction: 'ltr' | 'rtl'
   color: PointColor
 }
@@ -322,7 +326,13 @@ interface PreparedSdfMorph {
   glyphCanvases: Map<string, HTMLCanvasElement>
   glyphImages: Map<string, ImageData>
   frames: Map<string, Uint8ClampedArray<ArrayBufferLike>>
+  rasterAlignments: Partial<Record<'source' | 'target', SdfRasterAlignment>>
   overlayRoot?: HTMLElement
+}
+
+interface SdfRasterAlignment {
+  signature: string
+  verticalOffset: number
 }
 
 type RenderedMorph = PreparedMorph | PreparedSdfMorph
@@ -390,6 +400,7 @@ const browserBaselineCache = new WeakMap<
   { signature: string; baselineToHeight: number }
 >()
 const syntheticBaselineCache = new WeakMap<Document, Map<string, number>>()
+let sdfRasterAlignmentCache = new WeakMap<Document, Map<string, number>>()
 const endpointVisibilityLocks = new WeakMap<HTMLElement, EndpointVisibilityLock>()
 
 export const FONT_MORPH_RECORD_EVENT = 'font-morph:record'
@@ -435,6 +446,7 @@ export function configureFontMorph(options: FontMorphConfiguration) {
   preparedManifestLoads.clear()
   outlinePreparationPromises.clear()
   recordingOutlineCache = new WeakMap()
+  sdfRasterAlignmentCache = new WeakMap()
   normalizedOutlineCache.clear()
   preparedSdfCache.clear()
 }
@@ -661,8 +673,14 @@ function captureEndpoint(element: HTMLElement): GlyphEndpoint | null {
     fontFamily: style.fontFamily,
     fontStyle: style.fontStyle,
     fontWeight: style.fontWeight,
+    fontStretch: style.fontStretch,
+    fontKerning: style.fontKerning,
+    fontVariantCaps: style.fontVariantCaps,
     fontSizeToHeight: fontSize / logical.height,
     letterSpacingEm: Number.isFinite(letterSpacing) ? letterSpacing / fontSize : 0,
+    wordSpacingEm: Number.isFinite(Number.parseFloat(style.wordSpacing))
+      ? Number.parseFloat(style.wordSpacing) / fontSize
+      : 0,
     direction,
     color: parseColor(style.color),
   }
@@ -2535,6 +2553,7 @@ function mountPreparedSdf(
     glyphCanvases: new Map(),
     glyphImages: new Map(),
     frames: new Map(),
+    rasterAlignments: {},
     overlayRoot,
   }
 }
@@ -2647,6 +2666,239 @@ function sdfBaselineCorrection(
   return desiredCenter - (top + bottom) / 2
 }
 
+function applyEndpointCanvasTextStyle(
+  context: CanvasRenderingContext2D,
+  endpoint: GlyphEndpoint,
+  size: number,
+) {
+  const { style } = endpoint
+  const fontParts = [
+    style.fontStyle === 'normal' ? '' : style.fontStyle,
+    !style.fontVariantCaps || style.fontVariantCaps === 'normal' ? '' : style.fontVariantCaps,
+    style.fontWeight === 'normal' || style.fontWeight === '400' ? '' : style.fontWeight,
+    !style.fontStretch || style.fontStretch === 'normal' || style.fontStretch === '100%'
+      ? ''
+      : style.fontStretch,
+    `${size}px`,
+    style.fontFamily,
+  ].filter(Boolean)
+  context.font = fontParts.join(' ')
+  context.direction = style.direction
+  context.textAlign = 'start'
+  context.textBaseline = 'alphabetic'
+  if (style.fontKerning) context.fontKerning = style.fontKerning as CanvasFontKerning
+  if (style.fontStretch) context.fontStretch = style.fontStretch as CanvasFontStretch
+  if (style.fontVariantCaps) {
+    context.fontVariantCaps = style.fontVariantCaps as CanvasFontVariantCaps
+  }
+  context.letterSpacing = `${style.letterSpacingEm * size}px`
+  context.wordSpacing = `${(style.wordSpacingEm ?? 0) * size}px`
+}
+
+function alphaRowProjection(context: CanvasRenderingContext2D, width: number, height: number) {
+  const pixels = context.getImageData(0, 0, width, height).data
+  const projection = new Float64Array(height)
+  for (let index = 0; index < pixels.length / 4; index += 1) {
+    projection[Math.floor(index / width)] += pixels[index * 4 + 3]
+  }
+  return projection
+}
+
+function normalizedProjection(projection: Float64Array) {
+  let mass = 0
+  for (const value of projection) mass += value
+  if (mass <= 0) return null
+  return Float64Array.from(projection, (value) => value / mass)
+}
+
+function projectionCenter(projection: Float64Array) {
+  let mass = 0
+  let moment = 0
+  for (let index = 0; index < projection.length; index += 1) {
+    mass += projection[index]
+    moment += projection[index] * index
+  }
+  return mass > 0 ? moment / mass : null
+}
+
+function sampleProjection(projection: Float64Array, position: number) {
+  const lower = Math.floor(position)
+  const fraction = position - lower
+  const left = lower >= 0 && lower < projection.length ? projection[lower] : 0
+  const right = lower + 1 >= 0 && lower + 1 < projection.length ? projection[lower + 1] : 0
+  return interpolate(left, right, fraction)
+}
+
+/**
+ * Matches the generated endpoint's vertical coverage to the browser's native
+ * font rasterizer. CSS baselines align line boxes, but Canvas/SDF and DOM text
+ * can choose adjacent device-pixel rows for the same outline. Matching their
+ * normalized row profiles removes that platform- and DPR-dependent handoff.
+ */
+function matchedVerticalRasterOffset(
+  nativeProjection: Float64Array,
+  sdfProjection: Float64Array,
+  ratio: number,
+) {
+  const native = normalizedProjection(nativeProjection)
+  const sdf = normalizedProjection(sdfProjection)
+  if (!native || !sdf) return 0
+  const nativeCenter = projectionCenter(native)
+  const sdfCenter = projectionCenter(sdf)
+  if (nativeCenter === null || sdfCenter === null) return 0
+
+  const centerDelta = nativeCenter - sdfCenter
+  const maximumShift = Math.max(2, ratio * 2)
+  const minimum = Math.max(-maximumShift, centerDelta - ratio)
+  const maximum = Math.min(maximumShift, centerDelta + ratio)
+  const step = 0.125
+  let bestShift = Math.max(minimum, Math.min(maximum, centerDelta))
+  let bestScore = Number.POSITIVE_INFINITY
+  for (let shift = minimum; shift <= maximum + step / 2; shift += step) {
+    let score = 0
+    for (let row = 0; row < native.length; row += 1) {
+      const difference = native[row] - sampleProjection(sdf, row - shift)
+      score += difference * difference
+    }
+    // Row profiles can contain nearly symmetric plateaus. Prefer the shift
+    // whose centroid also converges when two candidates are visually equal.
+    score += Math.abs(sdfCenter + shift - nativeCenter) * 1e-7
+    if (
+      score < bestScore - 1e-12 ||
+      (Math.abs(score - bestScore) <= 1e-12 &&
+        Math.abs(shift - centerDelta) < Math.abs(bestShift - centerDelta))
+    ) {
+      bestScore = score
+      bestShift = shift
+    }
+  }
+  return bestShift / ratio
+}
+
+function sdfRasterAlignment(
+  prepared: PreparedSdfMorph,
+  endpoint: GlyphEndpoint,
+  run: FontMorphCompiledRun,
+  side: 'source' | 'target',
+  frame: CaptureFrame,
+  ratio: number,
+  baselineCorrection: number,
+) {
+  const signature = JSON.stringify({
+    side,
+    text: endpoint.text,
+    rect: endpoint.rect,
+    style: endpoint.style,
+    frame,
+    ratio,
+  })
+  const cached = prepared.rasterAlignments[side]
+  if (cached?.signature === signature) return cached.verticalOffset
+
+  const ownerDocument = prepared.layer.ownerDocument
+  let documentCache = sdfRasterAlignmentCache.get(ownerDocument)
+  if (!documentCache) {
+    documentCache = new Map()
+    sdfRasterAlignmentCache.set(ownerDocument, documentCache)
+  }
+  const shared = documentCache.get(signature)
+  if (shared !== undefined) {
+    prepared.rasterAlignments[side] = { signature, verticalOffset: shared }
+    return shared
+  }
+  const screenFontSize =
+    (fontSize(endpoint) * frame.screen.height) / endpoint.frame.logicalHeight
+  const endpointLeft = endpoint.rect.left * frame.screen.width
+  const endpointTop = endpoint.rect.top * frame.screen.height
+  const endpointWidth = endpoint.rect.width * frame.screen.width
+  const endpointHeight = endpoint.rect.height * frame.screen.height
+  const endpointBaseline =
+    endpointTop + (baseline(endpoint) * frame.screen.height) / endpoint.frame.logicalHeight
+  const padding = Math.max(8, screenFontSize)
+  const originLeft = Math.floor((endpointLeft - padding) * ratio) / ratio
+  const originTop = Math.floor((endpointTop - padding) * ratio) / ratio
+  const pixelWidth = Math.max(1, Math.ceil((endpointWidth + padding * 2) * ratio))
+  const pixelHeight = Math.max(1, Math.ceil((endpointHeight + padding * 2) * ratio))
+  const createMask = () => {
+    const canvas = ownerDocument.createElement('canvas')
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
+    return canvas
+  }
+  const nativeMask = createMask()
+  const nativeContext = nativeMask.getContext('2d')
+  const sdfMask = createMask()
+  const sdfContext = sdfMask.getContext('2d')
+  if (!nativeContext || !sdfContext) return 0
+
+  nativeContext.setTransform(ratio, 0, 0, ratio, 0, 0)
+  applyEndpointCanvasTextStyle(nativeContext, endpoint, screenFontSize)
+  nativeContext.fillStyle = '#000'
+  const nativeStart =
+    endpoint.style.direction === 'rtl' ? endpointLeft + endpointWidth : endpointLeft
+  nativeContext.fillText(
+    endpoint.text,
+    nativeStart - originLeft,
+    endpointBaseline - originTop,
+  )
+
+  sdfContext.setTransform(ratio, 0, 0, ratio, 0, 0)
+  sdfContext.imageSmoothingEnabled = true
+  const glyphCanvases = new Map<string, HTMLCanvasElement>()
+  for (let index = 0; index < run.glyphs.length; index += 1) {
+    const glyph = run.glyphs[index]
+    const glyphKey = glyph.key ?? glyph.unicode
+    const compiled = prepared.data.glyphs[glyphKey] ?? prepared.data.glyphs[glyph.unicode]
+    if (!compiled) continue
+    const box = sdfGlyphBox(
+      endpoint,
+      run,
+      glyph,
+      compiled[side],
+      index,
+      baselineCorrection,
+    )
+    let glyphCanvas = glyphCanvases.get(glyphKey)
+    if (!glyphCanvas) {
+      const alpha = renderFontMorphSdfAlphaFrame(compiled, side === 'source' ? 0 : 1, undefined, {
+        coverageRamp: fontMorphSdfCoverageRamp(
+          compiled,
+          box.width * frame.screen.width,
+          box.height * frame.screen.height,
+          ratio,
+        ),
+      })
+      glyphCanvas = ownerDocument.createElement('canvas')
+      glyphCanvas.width = compiled.size
+      glyphCanvas.height = compiled.size
+      const glyphContext = glyphCanvas.getContext('2d')
+      if (!glyphContext) continue
+      const image = glyphContext.createImageData(compiled.size, compiled.size)
+      for (let pixel = 0; pixel < alpha.length; pixel += 1) {
+        image.data[pixel * 4 + 3] = alpha[pixel]
+      }
+      glyphContext.putImageData(image, 0, 0)
+      glyphCanvases.set(glyphKey, glyphCanvas)
+    }
+    sdfContext.drawImage(
+      glyphCanvas,
+      box.left * frame.screen.width - originLeft,
+      box.top * frame.screen.height - originTop,
+      box.width * frame.screen.width,
+      box.height * frame.screen.height,
+    )
+  }
+
+  const verticalOffset = matchedVerticalRasterOffset(
+    alphaRowProjection(nativeContext, pixelWidth, pixelHeight),
+    alphaRowProjection(sdfContext, pixelWidth, pixelHeight),
+    ratio,
+  )
+  prepared.rasterAlignments[side] = { signature, verticalOffset }
+  documentCache.set(signature, verticalOffset)
+  return verticalOffset
+}
+
 function paintPreparedSdf(
   prepared: PreparedSdfMorph,
   geometryProgress: number,
@@ -2691,6 +2943,28 @@ function paintPreparedSdf(
     data.glyphs,
     'target',
   )
+  const sourceRasterOffset = sdfRasterAlignment(
+    prepared,
+    source,
+    data.sourceRun,
+    'source',
+    frame,
+    ratio,
+    sourceBaselineCorrection,
+  )
+  const targetRasterOffset = sdfRasterAlignment(
+    prepared,
+    target,
+    data.targetRun,
+    'target',
+    frame,
+    ratio,
+    targetBaselineCorrection,
+  )
+  const correctedSourceBaseline =
+    sourceBaselineCorrection + sourceRasterOffset / frame.screen.height
+  const correctedTargetBaseline =
+    targetBaselineCorrection + targetRasterOffset / frame.screen.height
 
   for (let index = 0; index < data.sourceRun.glyphs.length; index += 1) {
     const sourceGlyph = data.sourceRun.glyphs[index]
@@ -2705,7 +2979,7 @@ function paintPreparedSdf(
         sourceGlyph,
         compiled.source,
         index,
-        sourceBaselineCorrection,
+        correctedSourceBaseline,
       ),
       sdfGlyphBox(
         target,
@@ -2713,7 +2987,7 @@ function paintPreparedSdf(
         targetGlyph,
         compiled.target,
         index,
-        targetBaselineCorrection,
+        correctedTargetBaseline,
       ),
       geometryProgress,
     )
