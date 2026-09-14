@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glyphflux.com/config-schema.json",
+  "title": "Glyphflux configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fonts", "morphs", "output"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "defaultLocale": { "type": "string", "minLength": 1, "default": "und" },
+    "locales": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "catalogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Flat JSON catalog path containing a [locale] placeholder."
+        },
+        "sourceLookup": { "const": "value", "default": "value" }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/document" }
+    },
+    "texts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "fonts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sans", "serif"],
+      "properties": {
+        "sans": { "$ref": "#/$defs/fontList" },
+        "serif": { "$ref": "#/$defs/fontList" }
+      }
+    },
+    "morphs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target"],
+        "properties": {
+          "source": { "$ref": "#/$defs/instances" },
+          "target": { "$ref": "#/$defs/instances" }
+        }
+      }
+    },
+    "compiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": { "type": "integer", "minimum": 1 },
+        "pixelsPerEm": { "type": "integer", "minimum": 1 },
+        "maximumDistance": { "type": "integer", "minimum": 1 },
+        "supersampling": { "type": "integer", "minimum": 1 },
+        "texturePadding": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifests"],
+      "properties": {
+        "manifests": { "type": "string", "minLength": 1 },
+        "runtimeModule": { "type": "string", "minLength": 1 },
+        "runtimeExport": {
+          "type": "string",
+          "pattern": "^[$A-Z_a-z][$A-Z_a-z0-9]*$",
+          "default": "glyphfluxLocaleByText"
+        }
+      }
+    }
+  },
+  "anyOf": [
+    { "required": ["documents"] },
+    { "required": ["texts"] }
+  ],
+  "$defs": {
+    "fontList": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file"],
+            "properties": {
+              "file": { "type": "string", "minLength": 1 },
+              "faceIndex": { "type": "integer", "minimum": 0 }
+            }
+          }
+        ]
+      }
+    },
+    "instances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "weights", "opticalSizes"],
+      "properties": {
+        "role": { "enum": ["sans", "serif"] },
+        "weights": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        },
+        "opticalSizes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        }
+      }
+    },
+    "fontSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["heading", "element"] },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "name": { "type": "string", "minLength": 1 },
+        "textAttribute": { "type": "string", "minLength": 1 },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "boolean"] }
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include", "format", "sources", "targets"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "format": { "const": "mdx" },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fontSelector" }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fontSelector" }
+        }
+      }
+    }
+  }
+}
