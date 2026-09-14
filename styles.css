@@ -1,0 +1,52 @@
+:root {
+  --font-morph-duration: 760ms;
+  --font-morph-sans-weight: 500;
+  --font-morph-serif-weight: 600;
+  --font-morph-serif-optical-size: 23;
+}
+
+/* Endpoints retain their layout and accessibility semantics while a fixed
+   SVG layer interpolates their paired glyph contours. */
+[data-font-morph] {
+  font-synthesis: none;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  font-variant-ligatures: none;
+}
+
+:root[data-font-morph-active] [data-font-morph] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root[data-font-morph-fallback] [data-font-morph] {
+  opacity: 1 !important;
+}
+
+.font-morph-layer,
+.font-morph-source-layer,
+.font-morph-target-layer {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 2147483646;
+  display: block;
+  pointer-events: none;
+  transform-origin: top left;
+  will-change: transform, width, height;
+}
+
+.font-morph-source-layer,
+.font-morph-target-layer {
+  will-change: opacity;
+}
+
+.font-morph-blend-root {
+  isolation: isolate;
+}
+
+.font-morph-layer,
+.font-morph-source-layer,
+.font-morph-target-layer,
+.font-morph-director-layer {
+  mix-blend-mode: plus-lighter;
+}

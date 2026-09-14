@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "removeComments": false,
+    "allowSyntheticDefaultImports": true,
+    "module": "ESNext",
+    "target": "ES2022",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "moduleResolution": "Bundler",
+    "sourceMap": false,
+    "declarationMap": false,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["**/*.test.ts"]
+}

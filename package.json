@@ -1,0 +1,123 @@
+{
+  "name": "glyphflux",
+  "version": "0.1.0",
+  "description": "A lightweight JavaScript library for morphing the same text between different fonts.",
+  "keywords": [
+    "font",
+    "morph",
+    "typography",
+    "animation",
+    "svg",
+    "sdf",
+    "unicode"
+  ],
+  "homepage": "https://github.com/logflash/glyphflux#readme",
+  "bugs": {
+    "url": "https://github.com/logflash/glyphflux/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/logflash/glyphflux.git"
+  },
+  "license": "MIT",
+  "author": "Ian Henriques",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
+    },
+    "./compiler": {
+      "types": "./dist/compiler/index.d.mts",
+      "import": "./dist/compiler/index.mjs",
+      "default": "./dist/compiler/index.mjs"
+    },
+    "./build": {
+      "types": "./dist/build/index.d.mts",
+      "import": "./dist/build/index.mjs",
+      "default": "./dist/build/index.mjs"
+    },
+    "./sdf": {
+      "types": "./dist/sdf-runtime/index.d.mts",
+      "import": "./dist/sdf-runtime/index.mjs",
+      "default": "./dist/sdf-runtime/index.mjs"
+    },
+    "./outline-worker.js": "./dist/outline-worker.js",
+    "./styles.css": "./styles.css"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "glyphflux": "bin/glyphflux.js"
+  },
+  "directories": {
+    "test": "test"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "glyphflux.schema.json",
+    "README.md",
+    "styles.css"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/build-outline-worker.mjs",
+    "prepack": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint --quiet src e2e demo",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p demo/tsconfig.json",
+    "e2e": "corepack pnpm run build && node e2e/run.mjs",
+    "predemo": "corepack pnpm run demo:sdf",
+    "demo": "vite --config demo/vite.config.ts",
+    "demo:sdf": "corepack pnpm run build && node scripts/build-sdf-demo.mjs",
+    "demo:validate": "corepack pnpm run build && node scripts/validate-demo-catalog.mjs",
+    "demo:determinism": "corepack pnpm run build && node scripts/verify-demo-determinism.mjs",
+    "demo:continuity": "node scripts/verify-sdf-continuity.mjs",
+    "demo:view-continuity": "node scripts/verify-view-continuity.mjs",
+    "demo:endpoint-handoff": "node scripts/verify-endpoint-handoff.mjs",
+    "demo:build": "vite build --config demo/vite.config.ts",
+    "site:build": "corepack pnpm run demo:sdf && corepack pnpm run demo:build && node scripts/copy-config-schema.mjs",
+    "demo:preview": "vite preview --config demo/vite.config.ts",
+    "demo:gif": "corepack pnpm run demo:sdf && corepack pnpm run demo:build && node scripts/capture-demo-gif.mjs",
+    "demo:audit": "node scripts/capture-continuity-audit.mjs",
+    "demo:test": "corepack pnpm run demo:sdf && corepack pnpm run demo:build && corepack pnpm run demo:continuity && corepack pnpm run demo:view-continuity && corepack pnpm run demo:endpoint-handoff && node demo/e2e.mjs",
+    "diagnostics": "corepack pnpm run build && node scripts/render-sdf-diagnostics.mjs"
+  },
+  "dependencies": {
+    "@mdx-js/mdx": "3.1.1",
+    "fast-glob": "^3.3.3",
+    "fontkit": "2.0.4",
+    "harfbuzzjs": "1.6.1",
+    "kute.js": "2.2.6",
+    "opentype.js": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tanstack/react-router": "~1.159.14",
+    "@tanstack/react-start": "~1.159.14",
+    "@types/node": "^22.13.5",
+    "@types/opentype.js": "^1.3.10",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "esbuild": "^0.28.2",
+    "gifenc": "^1.0.3",
+    "oxlint": "^1.79.0",
+    "playwright-core": "^1.57.0",
+    "pngjs": "^7.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tsdown": "^0.21.10",
+    "typescript": "^5.9.2",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": [
+    "./styles.css"
+  ],
+  "packageManager": "pnpm@10.34.5"
+}

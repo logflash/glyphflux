@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "fonts": [
+    {
+      "id": "ibm-plex-sans-400",
+      "file": "demo/public/fonts/ibm-plex-sans-400-outline.ttf",
+      "sha256": "8779510a4f748ebec6ceef040a833e11e7f645f3fb002702cca1898c89e8a0d5",
+      "faceIndex": 0,
+      "axes": {}
+    },
+    {
+      "id": "source-serif-4-600",
+      "file": "demo/public/fonts/source-serif-4-600-outline.ttf",
+      "sha256": "187d6c27680a374bb352eb7f5a27845be51c18ee64958d2e5d95d918fcd13f91",
+      "faceIndex": 0,
+      "axes": {
+        "opsz": 23,
+        "wght": 600
+      }
+    },
+    {
+      "id": "noto-sans-jp-400",
+      "file": "demo/public/fonts/noto-sans-jp-400-outline.ttf",
+      "sha256": "5d6de49c69c1b4325d731c0570d2b10f33ea1951d118c3abd982db729d6cbfea",
+      "faceIndex": 0,
+      "axes": {}
+    },
+    {
+      "id": "noto-serif-jp-600",
+      "file": "demo/public/fonts/noto-serif-jp-600-outline.ttf",
+      "sha256": "e4fc18cf006b9c853e1f83236fd21fe5a82f34453a0dc509d4a35f473dcc3224",
+      "faceIndex": 0,
+      "axes": {}
+    }
+  ]
+}
