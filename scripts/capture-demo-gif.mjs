@@ -7,7 +7,7 @@ import gifenc from 'gifenc'
 import pngjs from 'pngjs'
 import { getBrowser } from '../e2e/browser.mjs'
 
-const { GIFEncoder, applyPalette, quantize } = gifenc
+const { GIFEncoder, quantize } = gifenc
 const { PNG } = pngjs
 const demoRoot = fileURLToPath(new URL('../demo-dist/client/', import.meta.url))
 const outputPath = fileURLToPath(new URL('../assets/demo.gif', import.meta.url))
@@ -25,6 +25,45 @@ const contentTypes = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
+}
+
+function createStablePaletteMapper(palette) {
+  const colorCache = new Uint16Array(1 << 24)
+
+  return (rgba) => {
+    const indexed = new Uint8Array(rgba.byteLength / 4)
+    for (let pixel = 0, source = 0; pixel < indexed.length; pixel += 1, source += 4) {
+      const red = rgba[source]
+      const green = rgba[source + 1]
+      const blue = rgba[source + 2]
+      const colorKey = (red << 16) | (green << 8) | blue
+      let cached = colorCache[colorKey]
+
+      if (cached === 0) {
+        let nearestIndex = 0
+        let nearestDistance = Number.POSITIVE_INFINITY
+        for (let index = 0; index < palette.length; index += 1) {
+          const color = palette[index]
+          const redDistance = red - color[0]
+          const greenDistance = green - color[1]
+          const blueDistance = blue - color[2]
+          const distance =
+            redDistance * redDistance +
+            greenDistance * greenDistance +
+            blueDistance * blueDistance
+          if (distance < nearestDistance) {
+            nearestDistance = distance
+            nearestIndex = index
+          }
+        }
+        cached = nearestIndex + 1
+        colorCache[colorKey] = cached
+      }
+
+      indexed[pixel] = cached - 1
+    }
+    return indexed
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -85,6 +124,7 @@ try {
       .view-demo-scene { min-height: 0; padding-top: 18px; }
       .view-demo-copy { margin-top: 14px; }
       .view-demo-action { margin-top: 14px; }
+      .demo-switch-link { visibility: hidden !important; }
       #capture-pointer {
         position: fixed;
         z-index: 2147483647;
@@ -308,15 +348,26 @@ try {
     await selectLocale(locale)
     await sweep(0, 1, 10)
   }
-  await selectLocale('en')
-  const routeLink = page.getByRole('link', { name: 'See the view transition demo' })
-  await movePointer(await centerOf(routeLink))
+  const controlledExitLocale = controlledLocales.at(-1)
+  const firstViewLocale = viewLocales.at(0)
+  assert(controlledExitLocale)
+  assert(firstViewLocale)
   await fadeCurtain(1)
-  await routeLink.click()
-  await page.waitForURL('**/en/view/sans')
+  await page.locator('.demo-switch-link').evaluate((element) => element.click())
+  await page.waitForURL(`**/${controlledExitLocale}/view/sans`)
+  await page.locator('#view-locale').selectOption(firstViewLocale)
+  await page.waitForURL(`**/${firstViewLocale}/view/sans`)
+  await page.waitForFunction(
+    (expected) =>
+      document.querySelector('[data-view-demo]')?.getAttribute('data-view-demo') === 'sans' &&
+      document.querySelector('#view-locale')?.value === expected,
+    firstViewLocale,
+  )
+  const viewButtonCenter = await centerOf(page.locator('.view-demo-action button'))
+  await setPointer(viewButtonCenter.x, viewButtonCenter.y)
   await fadeCurtain(0)
   await capture(420)
-  let activeViewLocale = 'en'
+  let activeViewLocale = firstViewLocale
   for (const locale of viewLocales) {
     if (locale !== activeViewLocale) {
       await selectViewLocale(locale)
@@ -354,10 +405,13 @@ try {
   const palette = quantize(palettePixels.subarray(0, paletteOffset), 128, {
     format: paletteFormat,
   })
+  const applyStablePalette = createStablePaletteMapper(palette)
   let firstFrame = true
   for (const frame of frames) {
     const image = PNG.sync.read(frame.png)
-    const indexed = applyPalette(image.data, palette, paletteFormat)
+    // gifenc's reduced-bit cache is order-dependent for nearby colors. Cache
+    // exact RGB values across the full animation to keep flat UI colors stable.
+    const indexed = applyStablePalette(image.data)
     encoder.writeFrame(indexed, width, height, {
       ...(firstFrame ? { palette } : {}),
       delay: frame.delay,

@@ -46,6 +46,12 @@ select {
   margin-bottom: 7px;
 }
 
+.glyphflux-logo {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
 .eyebrow {
   margin: 0;
   color: #6d6d6d;
@@ -91,7 +97,7 @@ h1 {
 
 select {
   appearance: none;
-  min-width: 150px;
+  min-width: 169px;
   padding: 8px 40px 8px 10px;
   border: 1px solid #cecece;
   border-radius: 4px;
@@ -101,6 +107,7 @@ select {
   background-repeat: no-repeat;
   background-size: 12px 8px;
   color: #171717;
+  cursor: pointer;
 }
 
 .stage {
@@ -256,7 +263,7 @@ input[type='range'][aria-disabled='true'] {
   display: inline-block;
   max-width: 100%;
   margin-top: 4px;
-  color: #5f41a8;
+  color: #171717;
   font-size: 13px;
   overflow-wrap: anywhere;
   text-underline-offset: 3px;
@@ -269,6 +276,7 @@ input[type='range'][aria-disabled='true'] {
   min-height: 100vh;
   margin: 0 auto;
   padding: 48px clamp(24px, 6vw, 72px) 64px;
+  user-select: text;
 }
 
 .view-demo::before {
@@ -276,7 +284,7 @@ input[type='range'][aria-disabled='true'] {
   z-index: -1;
   inset: 0 50%;
   width: 100vw;
-  background: #fbfaff;
+  background: #f4efff;
   content: '';
   transform: translateX(-50%);
   transition: background-color 320ms ease;
@@ -328,7 +336,7 @@ input[type='range'][aria-disabled='true'] {
 }
 
 .view-heading.serif {
-  color: #1d1813;
+  color: #8a6a00;
   font-family: var(--target-font-family), serif;
   font-size: clamp(52px, 10vw, 104px);
   font-optical-sizing: none;
@@ -358,6 +366,13 @@ input[type='range'][aria-disabled='true'] {
 
 .view-demo-copy.active {
   opacity: 1;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.view-demo-copy:not(.active) {
+  pointer-events: none;
+  user-select: none;
 }
 
 .view-demo-copy h2 {
@@ -382,11 +397,20 @@ input[type='range'][aria-disabled='true'] {
 
 .view-demo button {
   padding: 10px 14px;
-  border: 1px solid #6b4aae;
+  border: 1px solid currentColor;
   border-radius: 5px;
   background: transparent;
-  color: #5d3da0;
   cursor: pointer;
+}
+
+.view-demo.sans button,
+.view-demo.sans .demo-switch-link {
+  color: #6946b1;
+}
+
+.view-demo.serif button,
+.view-demo.serif .demo-switch-link {
+  color: #8a6a00;
 }
 
 .view-demo button:disabled {

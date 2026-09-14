@@ -10,12 +10,12 @@ import { useInkCentering } from './useInkCentering'
 const transitionKey = 'glyphflux-route-heading'
 const routeCopy = {
   sans: {
-    heading: 'One string, ready to move.',
+    heading: 'One string, ready to morph.',
     body: 'Glyph correspondence is precomputed at build time, then served as compact data that browsers reconstruct with little runtime overhead.',
   },
   serif: {
-    heading: 'The content changed too.',
-    body: 'Position, scale, color, and glyph structure settle together while the surrounding route updates.',
+    heading: 'One morph, smoothly executed.',
+    body: 'Position, scale, color, and glyph structure morph together while the surrounding route updates.',
   },
 } as const
 
