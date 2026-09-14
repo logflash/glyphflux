@@ -1,5 +1,11 @@
 # glyphflux
 
+## 0.1.2
+
+### Patch Changes
+
+- 877f32e: Add Glyphflux branding and polish the demo site with full-page view states, stable controls, an updated showcase animation, and deterministic GIF color encoding.
+
 ## 0.1.1
 
 ### Patch Changes
