@@ -1,5 +1,11 @@
 # glyphflux
 
+## 0.1.3
+
+### Patch Changes
+
+- 78f8580: Group the Glyphflux logo, wordmark, and GitHub icon into one repository link with a shared hover state throughout the demo site.
+
 ## 0.1.2
 
 ### Patch Changes
