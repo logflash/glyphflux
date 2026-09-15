@@ -50,28 +50,38 @@ select {
   display: block;
   width: 20px;
   height: 20px;
+  opacity: 0.62;
+  transition: opacity 140ms ease;
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #6d6d6d;
+  text-decoration: none;
+  transition: color 140ms ease;
 }
 
 .eyebrow {
   margin: 0;
-  color: #6d6d6d;
+  color: inherit;
   font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.github-link {
-  display: inline-flex;
-  color: #6d6d6d;
-  transition: color 140ms ease;
-}
-
-.github-link:hover,
-.github-link:focus-visible {
+.brand-link:hover,
+.brand-link:focus-visible {
   color: #171717;
 }
 
-.github-link svg {
+.brand-link:hover .glyphflux-logo,
+.brand-link:focus-visible .glyphflux-logo {
+  opacity: 1;
+}
+
+.github-icon {
   width: 15px;
   height: 15px;
   fill: none;
