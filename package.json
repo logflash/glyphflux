@@ -1,6 +1,6 @@
 {
   "name": "glyphflux",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A lightweight JavaScript library for morphing the same text between different fonts.",
   "keywords": [
     "font",
