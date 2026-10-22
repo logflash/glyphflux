@@ -3540,9 +3540,11 @@ async function animateTo(morph: ActiveMorph, targetElement: HTMLElement) {
     if (linearProgress < 1) {
       morph.frame = requestAnimationFrame(paint)
     } else {
-      // Preserve one fully settled painted frame before replacing the exact
-      // destination clone with the authored DOM endpoint.
-      morph.frame = requestAnimationFrame(() => cleanup(morph))
+      // Reveal the real endpoint in this paint. A separate frame of the
+      // transformed DOM clone can rasterize heavier than the settled text
+      // (notably regular sans on Windows), producing a one-frame weight flash.
+      // cleanup pins the endpoint visible before removing the overlay.
+      cleanup(morph)
     }
   }
 
@@ -3742,7 +3744,7 @@ export function createFontMorphFrameRenderer() {
     // appeared may never leak backward into an earlier frame.
     if (state && frame.progress < state.lastProgress) clear()
 
-    if (frame.phase === 'settled') {
+    if (frame.phase === 'settled' || frame.progress >= 1) {
       clear()
       const currentTarget = findMatchingEndpoint(
         frame.document,

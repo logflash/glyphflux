@@ -84,6 +84,7 @@ try {
             setupFrames: 0,
             blankSetupFrames: 0,
             activeLayers: null,
+            settledEndpoint: null,
             done: false,
           }
           globalThis.__glyphfluxHandoffAudit = state
@@ -137,6 +138,14 @@ try {
                 if (!hasVisibleLayer) state.blankSetupFrames += 1
               }
             } else if (state.sawActive) {
+              const endpoint = document.querySelector('.view-heading')
+              const style = endpoint && getComputedStyle(endpoint)
+              state.settledEndpoint = {
+                text: endpoint?.textContent,
+                opacity: style?.opacity,
+                visibility: style?.visibility,
+                active: document.documentElement.hasAttribute('data-font-morph-active'),
+              }
               state.done = true
               return
             }
@@ -200,8 +209,19 @@ try {
         }
         const lastHandoff = handoffSamples.at(-1)
         assert(lastHandoff.source <= 0.001, `${viewport.name}:${locale}: source settled`)
-        assert(lastHandoff.renderer <= 0.001, `${viewport.name}:${locale}: renderer settled`)
-        assert(lastHandoff.destination >= 0.999, `${viewport.name}:${locale}: target settled`)
+        // The final generated frame hands directly to authored text. An extra
+        // paint of the transformed clone can change apparent weight on Windows.
+        assert(lastHandoff.renderer >= 0.999, `${viewport.name}:${locale}: generated final frame`)
+        assert(
+          handoffSamples.every((sample) => sample.destination <= 0.001),
+          `${viewport.name}:${locale}: no final clone flash`,
+        )
+        assert.deepEqual(handoffAudit.settledEndpoint, {
+          text: language.text,
+          opacity: '1',
+          visibility: 'visible',
+          active: false,
+        }, `${viewport.name}:${locale}: native endpoint visible in the first settled paint`)
         assert.equal(await page.locator('.view-heading').textContent(), language.text)
       }
       assert.deepEqual(
