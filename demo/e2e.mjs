@@ -1000,23 +1000,38 @@ try {
   await interruptedPage.getByRole('button', { name: 'Morph to Serif' }).click()
   await interruptedPage.waitForURL('**/en/view/serif')
   await interruptedPage.waitForSelector('[data-font-morph-renderer="sdf"]')
-  await interruptedPage.reload({ waitUntil: 'domcontentloaded' })
-  const interruptedRefresh = await interruptedPage.evaluate(() => ({
-    path: window.location.pathname,
-    role: document.querySelector('[data-view-demo]')?.getAttribute('data-view-demo'),
-    headingClass: document.querySelector('.view-heading')?.className,
-    snapshot: document.documentElement.dataset.demoRefreshFrame,
-    activeMorph: document.documentElement.hasAttribute('data-font-morph-active'),
-  }))
-  assert.equal(interruptedRefresh.path, '/en/view/serif')
-  assert.equal(interruptedRefresh.role, 'serif')
-  assert.match(interruptedRefresh.headingClass, /\bserif\b/)
-  assert.equal(interruptedRefresh.snapshot, 'view')
-  assert.equal(
-    interruptedRefresh.activeMorph,
-    false,
-    'interrupted refresh: first paint must settle to the URL endpoint, not resume the morph',
-  )
+  // A warm font cache can finish hydration and remove the temporary snapshot
+  // before Playwright samples DOMContentLoaded. Hold font responses so this
+  // assertion deterministically observes the intended pre-font-load state.
+  let releaseRefreshFonts
+  const refreshFontsHeld = new Promise((resolve) => {
+    releaseRefreshFonts = resolve
+  })
+  await interruptedPage.route('**/fonts/*.ttf', async (route) => {
+    await refreshFontsHeld
+    await route.continue()
+  })
+  try {
+    await interruptedPage.reload({ waitUntil: 'domcontentloaded' })
+    const interruptedRefresh = await interruptedPage.evaluate(() => ({
+      path: window.location.pathname,
+      role: document.querySelector('[data-view-demo]')?.getAttribute('data-view-demo'),
+      headingClass: document.querySelector('.view-heading')?.className,
+      snapshot: document.documentElement.dataset.demoRefreshFrame,
+      activeMorph: document.documentElement.hasAttribute('data-font-morph-active'),
+    }))
+    assert.equal(interruptedRefresh.path, '/en/view/serif')
+    assert.equal(interruptedRefresh.role, 'serif')
+    assert.match(interruptedRefresh.headingClass, /\bserif\b/)
+    assert.equal(interruptedRefresh.snapshot, 'view')
+    assert.equal(
+      interruptedRefresh.activeMorph,
+      false,
+      'interrupted refresh: first paint must settle to the URL endpoint, not resume the morph',
+    )
+  } finally {
+    releaseRefreshFonts()
+  }
   await interruptedPage.waitForSelector('.view-heading[data-demo-ink-centered]')
   await interruptedPage.waitForFunction(() => !document.documentElement.dataset.demoRefreshFrame)
   assert.deepEqual(errors, [])

@@ -5,6 +5,12 @@ function clamp(value: number) {
   return Math.min(1, Math.max(0, value))
 }
 
+/** Timed outlines accelerate and settle gently, with zero speed at each end. */
+export function easedOutlineProgress(progress: number) {
+  const value = clamp(progress)
+  return value * value * (3 - 2 * value)
+}
+
 /**
  * Keeps the generated morph fully visible between its exact DOM endpoints.
  * Endpoint text is never cross-faded over an intermediate glyph: that would

@@ -5,7 +5,11 @@ import type { Font, PathCommand, RenderOptions } from 'opentype.js'
 import type { FontMorphCompiledRun } from './contracts/font'
 import type { FontMorphSdfGlyphPair, FontMorphSerializedSdfGlyphPair } from './contracts/sdf'
 import { fontMorphSdfCoverageRamp, renderFontMorphSdfAlphaFrame } from './sdf-runtime'
-import { DEFAULT_FONT_MORPH_DURATION_MS, endpointHandoffOpacities } from './timing'
+import {
+  DEFAULT_FONT_MORPH_DURATION_MS,
+  easedOutlineProgress,
+  endpointHandoffOpacities,
+} from './timing'
 
 export {
   DEFAULT_FONT_MORPH_DURATION_MS,
@@ -2540,6 +2544,33 @@ export async function prepareFontMorph(key?: string): Promise<void> {
   if (!prepared) await resolveNormalizedOutline(captured.text, source, target)
 }
 
+function updateOutlinePaintBounds(layer: SVGSVGElement, contours: ContourTemplate[]) {
+  // Ink can overhang the layout box (negative tracking, italic bearings, or
+  // tall marks). Every interpolated point stays inside the union of its two
+  // endpoints, so these bounds cover the entire animation without clipping.
+  let left = 0
+  let top = 0
+  let right = MORPH_VIEWBOX_SIZE
+  let bottom = MORPH_VIEWBOX_SIZE
+  for (const contour of contours) {
+    for (const points of [contour.source, contour.target]) {
+      for (const [x, y] of points) {
+        left = Math.min(left, x)
+        top = Math.min(top, y)
+        right = Math.max(right, x)
+        bottom = Math.max(bottom, y)
+      }
+    }
+  }
+  // Leave one canonical unit for antialiasing at the outer boundary.
+  for (const element of [layer.querySelector('mask'), layer.querySelector(':scope > rect')]) {
+    element?.setAttribute('x', String(left - 1))
+    element?.setAttribute('y', String(top - 1))
+    element?.setAttribute('width', String(right - left + 2))
+    element?.setAttribute('height', String(bottom - top + 2))
+  }
+}
+
 function mountPreparedOutline(
   layer: SVGSVGElement,
   source: GlyphEndpoint,
@@ -2557,10 +2588,6 @@ function mountPreparedOutline(
   const mask = createSvgElement(layer.ownerDocument, 'mask')
   mask.id = maskId
   mask.setAttribute('maskUnits', 'userSpaceOnUse')
-  mask.setAttribute('x', '0')
-  mask.setAttribute('y', '0')
-  mask.setAttribute('width', String(MORPH_VIEWBOX_SIZE))
-  mask.setAttribute('height', String(MORPH_VIEWBOX_SIZE))
   mask.style.maskType = 'luminance'
 
   const contours = prepared.contours.map((contour) => {
@@ -2572,12 +2599,11 @@ function mountPreparedOutline(
   })
 
   const fill = createSvgElement(layer.ownerDocument, 'rect')
-  fill.setAttribute('width', String(MORPH_VIEWBOX_SIZE))
-  fill.setAttribute('height', String(MORPH_VIEWBOX_SIZE))
   fill.setAttribute('fill', 'currentColor')
   fill.setAttribute('mask', `url(#${maskId})`)
   definitions.append(mask)
   layer.replaceChildren(definitions, fill)
+  updateOutlinePaintBounds(layer, contours)
   return { renderer: 'outline', layer, source, target, contours, overlayRoot }
 }
 
@@ -3216,6 +3242,7 @@ function mountFontMorphSession(prepared: RenderedMorph): FontMorphRenderSession 
             for (let index = 0; index < prepared.contours.length; index += 1) {
               Object.assign(prepared.contours[index], materialized.contours[index])
             }
+            updateOutlinePaintBounds(prepared.layer, prepared.contours)
           }
         }
       }
@@ -3580,9 +3607,8 @@ async function animateTo(morph: ActiveMorph, targetElement: HTMLElement) {
       cleanup(morph)
       return
     }
-    // Position/size retain the shared-element ease, but shape and color
-    // interpolation stay linear so the serifs develop throughout the full
-    // transition instead of being compressed into one part of it.
+    // Position/size retain the shared-element ease. Outline progress uses a
+    // gentler symmetric curve so the shape settles before the native handoff.
     if (morph.sourceHandoffLayer) {
       setDomHandoffLayerBox(
         morph.sourceHandoffLayer,
@@ -3608,7 +3634,7 @@ async function animateTo(morph: ActiveMorph, targetElement: HTMLElement) {
     if (morph.targetHandoffLayer) {
       morph.targetHandoffLayer.style.opacity = String(handoff.destination)
     }
-    session.render(geometryProgress, linearProgress, handoff.renderer)
+    session.render(geometryProgress, easedOutlineProgress(linearProgress), handoff.renderer)
 
     if (linearProgress < 1) {
       morph.frame = requestAnimationFrame(paint)
@@ -3975,7 +4001,7 @@ export function createFontMorphFrameRenderer() {
     }
     // Endpoint blending is also a pure function of absolute replay time, so
     // seeking and rewinding cannot retain opacity hysteresis.
-    state.session.render(geometryProgress, linearProgress, handoff.renderer)
+    state.session.render(geometryProgress, easedOutlineProgress(linearProgress), handoff.renderer)
   }
 }
 

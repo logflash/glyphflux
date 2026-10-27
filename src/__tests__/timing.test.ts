@@ -1,10 +1,32 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FONT_MORPH_DURATION_MS,
+  easedOutlineProgress,
   endpointHandoffOpacities,
 } from '../timing'
 
 describe('endpoint handoff timing', () => {
+  it('slows timed outlines to a stop without changing their endpoints or reversal', () => {
+    expect(easedOutlineProgress(-1)).toBe(0)
+    expect(easedOutlineProgress(0)).toBe(0)
+    expect(easedOutlineProgress(1)).toBe(1)
+    expect(easedOutlineProgress(2)).toBe(1)
+    let previous = 0
+    for (let step = 0; step <= 1_000; step += 1) {
+      const progress = step / 1_000
+      const eased = easedOutlineProgress(progress)
+      expect(eased).toBeGreaterThanOrEqual(previous)
+      expect(eased).toBeCloseTo(1 - easedOutlineProgress(1 - progress), 12)
+      previous = eased
+    }
+    const frame = 1_000 / 60 / DEFAULT_FONT_MORPH_DURATION_MS
+    const lastStep = 1 - easedOutlineProgress(1 - frame)
+    const precedingStep =
+      easedOutlineProgress(1 - frame) - easedOutlineProgress(1 - 2 * frame)
+    expect(lastStep).toBeLessThan(precedingStep / 2)
+    expect(lastStep).toBeLessThan(frame / 10)
+  })
+
   it('uses one normalized, reversible layer selection for exact endpoints and the renderer', () => {
     for (const duration of [40, DEFAULT_FONT_MORPH_DURATION_MS, 2_000]) {
       for (let step = 0; step <= 1_000; step += 1) {

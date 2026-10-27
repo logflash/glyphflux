@@ -635,6 +635,52 @@ try {
   await page.evaluate(() => window.fontMorphFixture.prepareUnknown())
   assert.equal(requests.get('/sans-outline.otf'), 1, 'unknown text should use the worker fallback')
   assert.equal(requests.get('/serif-outline.otf'), 1, 'unknown text should use the worker fallback')
+
+  // Tight tracking makes the last glyph's ink extend past its inline box.
+  // Exercise the worker outline renderer and reconstruct the same overhang
+  // through replay so neither mask nor paint rectangle can clip the stroke.
+  const outlineEventCount = await page.evaluate(() => {
+    document.documentElement.classList.remove('simulated-mobile-text-scaling')
+    const source = document.querySelector('[data-font-morph="sample"]')
+    source.style.letterSpacing = '-0.3em'
+    window.fontMorphFixture.begin()
+    window.fontMorphFixture.show('serif')
+    const target = document.querySelector('[data-font-morph="sample"]')
+    target.textContent = 'e'
+    target.style.letterSpacing = '-0.3em'
+    return window.fontMorphFixture.events.length
+  })
+  await page.waitForFunction(
+    (count) => window.fontMorphFixture.events.length > count,
+    outlineEventCount,
+  )
+  const assertInkCovered = async (selector) => {
+    const bounds = await page.locator(selector).evaluate((layer) => {
+      const paths = [...layer.querySelectorAll('mask path')].map((path) => path.getBBox())
+      const attributes = (element) =>
+        Object.fromEntries(
+          ['x', 'y', 'width', 'height'].map((name) => [name, Number(element.getAttribute(name))]),
+        )
+      return {
+        inkRight: Math.max(...paths.map((box) => box.x + box.width)),
+        mask: attributes(layer.querySelector('mask')),
+        fill: attributes(layer.querySelector(':scope > rect')),
+      }
+    })
+    assert.ok(bounds.inkRight > 1_000, 'fixture ink must overhang the layout box')
+    for (const box of [bounds.mask, bounds.fill]) {
+      assert.ok(box.x + box.width >= bounds.inkRight, 'outline ink must not be clipped')
+    }
+  }
+  await page.waitForSelector('svg.font-morph-layer')
+  await assertInkCovered('svg.font-morph-layer')
+  await page.waitForFunction(() => !document.documentElement.hasAttribute('data-font-morph-active'))
+  await page.evaluate(() => window.fontMorphFixture.prepareReplay())
+  await page.evaluate(() =>
+    window.fontMorphFixture.replayAt(window.fontMorphFixture.events.at(-1).duration * 0.999999),
+  )
+  await assertInkCovered('svg.font-morph-director-layer')
+  await page.evaluate(() => window.fontMorphFixture.stopReplay())
   assert.deepEqual(errors, [])
 
   console.log(`Glyphflux browser checks passed (preparation ${preparation.toFixed(1)}ms)`)
