@@ -199,6 +199,8 @@ export type FontMorphCaptureFrame = CaptureFrame
 
 interface KuteMorphRuntime {
   getInterpolationPoints: (source: string, target: string, precision: number) => [Polygon, Polygon]
+  flattenCommands: (commands: PathCommand[]) => Polygon
+  simplifyPolygons: (polygons: Polygon[]) => Polygon[]
   interpolateCoordinates: (
     source: Polygon,
     target: Polygon,
@@ -227,6 +229,7 @@ interface OutlineContour {
 interface GlyphOutline {
   contours: OutlineContour[]
   bounds: Rect
+  normalized: boolean
 }
 
 interface OutlineInstance {
@@ -1270,11 +1273,7 @@ function splitContours(commands: PathCommand[]) {
   return contours.filter((contour) => contour.some((command) => command.type !== 'M'))
 }
 
-function contourWinding(commands: PathCommand[]) {
-  const points: Polygon = []
-  for (const command of commands) {
-    if (command.type !== 'Z') points.push([command.x, command.y])
-  }
+function polygonWinding(points: Polygon) {
   let doubledArea = 0
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index]
@@ -1358,18 +1357,68 @@ function combinedBounds(contours: OutlineContour[]): Rect {
   }
 }
 
+function hasOutlineIntersections(polygons: Polygon[]) {
+  const segments = polygons.flatMap((polygon, contour) => {
+    const points = polygon.filter(([x, y], index) => {
+      const previous = polygon[(index + polygon.length - 1) % polygon.length]
+      return x !== previous[0] || y !== previous[1]
+    })
+    return points.map((start, index) => ({
+      start,
+      end: points[(index + 1) % points.length],
+      contour,
+      index,
+      count: points.length,
+    }))
+  })
+  const cross = (a: Polygon[number], b: Polygon[number], c: Polygon[number]) =>
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+  for (let i = 0; i < segments.length; i++) {
+    const left = segments[i]
+    for (let j = i + 1; j < segments.length; j++) {
+      const right = segments[j]
+      if (left.contour === right.contour) {
+        const distance = Math.abs(left.index - right.index)
+        if (distance === 1 || distance === left.count - 1) continue
+      }
+      const [a, b, c, d] = [left.start, left.end, right.start, right.end]
+      if (
+        Math.max(a[0], b[0]) < Math.min(c[0], d[0]) ||
+        Math.max(c[0], d[0]) < Math.min(a[0], b[0]) ||
+        Math.max(a[1], b[1]) < Math.min(c[1], d[1]) ||
+        Math.max(c[1], d[1]) < Math.min(a[1], b[1])
+      )
+        continue
+      if (cross(a, b, c) * cross(a, b, d) <= 0 && cross(c, d, a) * cross(c, d, b) <= 0) return true
+    }
+  }
+  return false
+}
+
 function classifyContours(
-  inputs: { path: string; winding: number }[],
+  inputs: { path: string; polygon: Polygon; winding: number }[],
   runtime: KuteMorphRuntime,
-): OutlineContour[] {
-  const contours: OutlineContour[] = inputs.map(({ path, winding }, index) => {
-    const polygon = runtime.getInterpolationPoints(path, path, MORPH_PRECISION)[0]
+  forceNormalization = false,
+): GlyphOutline {
+  // Fonts may build a closed counter from a self-overlapping contour (Source
+  // Serif's 4/R) rather than an explicit inner path. Resolve the nonzero-filled
+  // silhouette before classifying holes, so equivalent visible shapes have
+  // equivalent topology. Preserve the font's direction before the union so
+  // real inner contours remain subtractive.
+  const sampled = inputs.map(({ polygon, winding }) => {
+    return polygonWinding(polygon) === winding ? polygon : [...polygon].reverse()
+  })
+  // Keep the original curves for already-simple glyphs. Re-polygonizing them
+  // would unnecessarily resample extrema and shift otherwise exact endpoints.
+  const normalized = forceNormalization || hasOutlineIntersections(sampled)
+  const polygons = normalized ? runtime.simplifyPolygons(sampled) : sampled
+  const contours: OutlineContour[] = polygons.map((polygon, index) => {
     const { area, center } = polygonStats(polygon)
     return {
       index,
-      path,
+      path: normalized ? polygonPath(polygon) : inputs[index].path,
       polygon,
-      winding,
+      winding: polygonWinding(polygon),
       depth: 0,
       parentIndex: null,
       center,
@@ -1397,7 +1446,7 @@ function classifyContours(
     return parent ? contourDepth(parent) + 1 : 0
   }
   for (const contour of contours) contour.depth = contourDepth(contour)
-  return contours
+  return { contours, bounds: combinedBounds(contours), normalized }
 }
 
 function outlineFontIndex(text: string, fonts: readonly Font[], preferredIndex?: number) {
@@ -1468,12 +1517,11 @@ function buildOutline(
     return { commands }
   })
   return paths.map((path) => {
-    const contours = splitContours(path.commands).map((commands) => ({
-      path: contourPath(commands),
-      winding: contourWinding(commands),
-    }))
-    const classified = classifyContours(contours, runtime)
-    return { contours: classified, bounds: combinedBounds(classified) }
+    const contours = splitContours(path.commands).map((commands) => {
+      const polygon = runtime.flattenCommands(commands)
+      return { path: contourPath(commands), polygon, winding: polygonWinding(polygon) }
+    })
+    return classifyContours(contours, runtime)
   })
 }
 
@@ -1965,10 +2013,12 @@ function localBoundaryCorrespondence(source: Polygon, target: Polygon): [Polygon
 async function createOutlineRuntime(
   fontBuffers: Record<FontRole, readonly ArrayBuffer[]>,
 ): Promise<OutlineRuntime> {
-  const [opentype, kuteSvgMorph, fontkit] = await Promise.all([
+  const [opentype, kuteSvgMorph, fontkit, clipperModule, outlineModule] = await Promise.all([
     import('opentype.js'),
     import('kute.js/dist/kute.esm.js'),
     import('fontkit'),
+    import('clipper-lib'),
+    import('./geometry/path'),
   ])
   const opentypeModule = opentype as unknown as {
     parse?: (buffer: ArrayBuffer) => Font
@@ -1982,6 +2032,7 @@ async function createOutlineRuntime(
   }
   const createFont = fontkitModule.create ?? fontkitModule.default?.create
   if (!createFont) throw new Error('fontkit does not expose its parser')
+  const clipper = clipperModule.default
   return {
     fonts: Object.fromEntries(
       Object.entries(fontBuffers).map(([role, buffers]) => [
@@ -1996,6 +2047,21 @@ async function createOutlineRuntime(
       ]),
     ) as Record<FontRole, FontMorphOutlineFont[]>,
     getInterpolationPoints: kuteSvgMorph.default.Util.getInterpolationPoints,
+    // Flatten before KUTE resampling so exact line corners/extrema survive the
+    // union. The shared flattener uses y-up coordinates; restore screen y here.
+    flattenCommands: (commands) =>
+      (outlineModule.flattenPath(commands, 0.25)[0] ?? []).map(([x, y]) => [x, -y]),
+    simplifyPolygons: (polygons) => {
+      // Integer clipping is deterministic; 1/1000 of a canonical em unit is
+      // also the precision of serialized outline coordinates.
+      const scale = 1_000
+      const paths = polygons.map((polygon) =>
+        polygon.map(([x, y]) => ({ X: Math.round(x * scale), Y: Math.round(y * scale) })),
+      )
+      return clipper.Clipper.SimplifyPolygons(paths, clipper.PolyFillType.pftNonZero).map((path) =>
+        path.map(({ X, Y }) => [X / scale, Y / scale]),
+      )
+    },
     interpolateCoordinates,
   }
 }
@@ -2104,6 +2170,13 @@ function normalizedOutline(
 
   const contours: FontMorphPreparedContour[] = []
   for (let glyphIndex = 0; glyphIndex < sourceGlyphs.length; glyphIndex += 1) {
+    // Give both sides the same boundary representation when either side needed
+    // overlap removal. Mixing an original curve with a sampled union changes
+    // KUTE's starting-point correspondence and can fold the outer boundary.
+    if (sourceGlyphs[glyphIndex].normalized !== targetGlyphs[glyphIndex].normalized) {
+      const glyphs = sourceGlyphs[glyphIndex].normalized ? targetGlyphs : sourceGlyphs
+      glyphs[glyphIndex] = classifyContours(glyphs[glyphIndex].contours, runtime, true)
+    }
     for (const [sourceContour, targetContour] of pairGlyphContours(
       sourceGlyphs[glyphIndex],
       targetGlyphs[glyphIndex],
